@@ -225,7 +225,7 @@ int main(int argc, char *argv[]){
 		bool vuevent = false;
 		for (int i=0; i < gAudio.channels; i++){
 			struct chan * c = &gAudio.chan[i];
-			if(gAudio.vu_ms && (c->rms_val || c->peak_val)){
+			if(gAudio.vu_ms && (min_level < c->rms_val || min_level < c->peak_val)){
 				vuevent = true;
 				vu_print(&gAudio, "%0.1f %0.1f ", 20*flog(c->rms_val), 20*flog(c->peak_val));
 			}
@@ -240,7 +240,7 @@ int main(int argc, char *argv[]){
 			if(gAudio.level_sec && c->rms_val >= gAudio.level_thres && c->rms_val > trigger_level)
 				trigger_level = c->rms_val;
 		}
-		if(gAudio.vu_ms && vuevent)
+		if(vuevent)
 			vu_print(&gAudio, "\n");
 
 		if(gAudio.disconnected){ /* reset script timers so we turn stuff off immediately */

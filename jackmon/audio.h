@@ -19,13 +19,17 @@
 
 #include "utils.h"
 
+struct biquad {
+	ftype b0, b1, b2;
+	ftype a1, a2;
+	ftype z1, z2;
+	ftype y;
+};
+
 struct rms {
-	ftype * _buf; /* circular buffer containing samples squared - dynamically allocated */
-	unsigned buflen; /* power of two */
-	unsigned _init; /* how full- for first go */
-	unsigned _idx; /* index into buffer */
+	bool en;
+	struct biquad f;
 	ftype _sum_squared; /* current sum squared */
-	ftype _scale; /* inverse of the buflen to evaluate the mean squared */
 };
 
 struct peak {
@@ -106,32 +110,31 @@ struct audio {
 	const char ** _level_sink_ports; /* array of sink names determined on open */
 };
 
-int rms_init(struct rms * rms, unsigned buflen);
+static inline void run_biquad(ftype x, struct biquad * b){
+	ftype y = b->b0 * x + b->z1;
+	if(y < min_level*min_level) /* below noise floor (mean squared, so ^2)*/
+		b->y = b->z1 = b->z2 = 0.0;
+	else {
+		b->z1 = b->b1 * x - b->a1 * y + b->z2;
+		b->z2 = b->b2 * x - b->a2 * y;
+	    b->y = y;
+	}
+}
+
+void rms_init(struct rms * rms, double risetime, double samplerate);
 
 /* return 1 if RMS value becomes ready */
 static inline int rms_run(struct rms * rms, ftype sample) {
-	if(!rms->buflen)
+	if(!rms->en)
 		return 0; /* disabled */
-	sample *= sample;
-	ftype *p = rms->_buf + rms->_idx++;
-	if(rms->_idx == rms->buflen)
-		rms->_idx &= rms->buflen-1; /* wrap */
-	int ret = 0;
-	/* still initialising */
-	if(rms->_init < rms->buflen){
-		if(++rms->_init == rms->buflen)
-			ret = 1; /* becomes ready now */
-	} else
-		rms->_sum_squared -= *p; /* subtract oldest */
-	*p = sample; /* replace */
-	rms->_sum_squared += sample; /* accumulate */
-	return ret;
+	run_biquad(sample*sample, &rms->f);
+	return rms->f.y != 0.0;
 }
 
 /* call from background within critical section */
 
 static inline ftype rms_get(struct rms * rms){
-	return sqrtff(rms->_scale * rms->_sum_squared);
+	return rms->f.y ? sqrtff(rms->f.y) : 0.0;
 }
 
 
@@ -140,11 +143,16 @@ void peak_init(struct peak * peak, ftype atten, unsigned decay_samples, unsigned
 /* track max sample for hold_time ms, with a decay used after timer expires.
  * return 1 if peak changes */
 static inline int peak_run(struct peak * peak, ftype sample){
+	if(sample < min_level) /* flatten it */
+		sample = 0;
+
 	if(!peak->hold_time) {
 		if(sample >= peak->peak)
 			peak->peak = sample;
-		else
+		else if (sample > 0)
 			peak->peak *= peak->_decay;
+		else
+			peak->peak = 0.0;
 		return 0; /* never trigger events with no hold timer */
 	}
 
@@ -154,10 +162,13 @@ static inline int peak_run(struct peak * peak, ftype sample){
 		goto peak_detected;
 	}
 
+	/* get next peak after peak hold expires */
 	if(sample >= peak->_peak)
 		peak->_peak = sample;
-	else
+	else if (sample > 0)
 		peak->_peak *= peak->_decay;
+	else
+		peak->_peak = 0.0;
 
 	if(!timer_poll(&peak->_hold)){
 		peak->peak = peak->_peak;
@@ -208,7 +219,7 @@ static inline bool clip_get(struct clip * clip){
 static inline int audio_chan_run(struct chan * s, ftype sample){
 	int ret = 0;
 	sample = ffabs(sample); /* only care for magnitude */
-	if(s->rms.buflen)
+	if(s->rms.en)
 		ret += rms_run(&s->rms, sample);
 	if(s->peak.decay_samples)
 		ret += peak_run(&s->peak, sample);

@@ -8,6 +8,8 @@
 #define _GNU_SOURCE
 #include <errno.h>
 #include <string.h>
+#include <math.h>
+#include <stdio.h>
 
 #include "utils.h"
 #include "audio.h"
@@ -18,15 +20,30 @@ static int jack_process_frame (jack_nframes_t nframes, void *arg);
 static void jack_connect_cb(jack_port_id_t a, jack_port_id_t b, int connect, void *arg);
 static void jack_shutdown (void *arg);
 
+/* Compute 2nd order Butterworth low-pass biquad coefficients
+ * fc = cutoff frequency (Hz)
+ * fs = sample rate (Hz)
+*/
+void init_lowpass_biquad(double fc, double fs, struct biquad * b)
+{
+    double omega = 2.0 * M_PI * fc / fs; /* Pre-warp cutoff frequency to normalized rad/s */
+    double cos_omega = cos(omega);
+    double alpha = sin(omega) / (2.0 * M_SQRT1_2); /* Butterworth (Q = 1/sqrt(2)) */
+    double s = 1.0 / (1.0 + alpha); /* normalise for a0 = 1 */
+    b->b1 = (ftype)(s * (1.0 - cos_omega));
+    b->b0 = b->b2 = (ftype)(b->b1 * 0.5);
+    b->a1 = (ftype)(s * -2.0 * cos_omega);
+    b->a2 = (ftype)(s * (1.0 - alpha));
+    b->z1 = b->z2 = b->y = 0.0;
+}
+
 /* can be reinitialised */
-int rms_init(struct rms * rms, unsigned buflen){
-	if(rms->_buf)
-		free(rms->_buf);
-	rms->buflen = to_pow_2(buflen);
-	rms->_scale = (ftype)1.0/(ftype)rms->buflen;
-	rms->_sum_squared = 0.0;
-	rms->_init = rms->_idx = 0;
-	return !((rms->_buf=malloc(sizeof(ftype)*rms->buflen)));
+void rms_init(struct rms * rms, double risetime, double samplerate){
+	if(!risetime)
+		return;
+	rms->en = true;
+	double fc = 0.175 / risetime; /* estimate fc for 99% risetime */
+	init_lowpass_biquad(fc, samplerate, &rms->f);
 }
 
 void peak_init(struct peak * peak, ftype atten, unsigned decay_samples, unsigned hold_ms){
@@ -125,8 +142,8 @@ int audio_init(struct audio * audio) {
 		peak_init(&c->peak, 0.001, (int)audio->samplerate, 1500); /* hold 1.5 seconds. decay 1 seconds to -60dB */
 		if(audio->clip_en)
 			clip_init(&c->clip, 3); /* 3 consecutive samples over >=1.0 means clip */
-		if(audio->rms_en && rms_init(&c->rms, audio->vu_ms?2*audio->vu_ms:(int)audio->samplerate/5)) /* average window 2x vu update rate, or 200 ms moving average */
-			return 1; /* memory out */
+		if(audio->rms_en)
+			rms_init(&c->rms, 0.05, (double)audio->samplerate); /* 50ms rise... has longer decay */
 
 		char *in="";
 		if(!asprintf(&in, "%d", i+1) ||

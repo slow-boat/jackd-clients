@@ -11,6 +11,7 @@
 #define _GNU_SOURCE
 #include <stdbool.h>
 #include <time.h>
+#include <math.h>
 
 #if !defined(__arm__) && !defined(__aarch64__)
 typedef double ftype;
@@ -29,6 +30,8 @@ typedef float ftype;
 #define sqrtff sqrtf
 #define ftmin -(FLT_MAX)
 #endif
+
+static const ftype min_level = fpow(10.0, -130.0/20.0); /* noise below this */
 
 #define to_pow_2(x) ({ \
     unsigned int v = (x); \
