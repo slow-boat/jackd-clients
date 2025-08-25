@@ -77,6 +77,7 @@ struct audio {
 	unsigned vu_ms; /* ms poll rate for VU updates- events will update faster */
 	char * clip_cmd; /* script to run -eg trigger a one-shot LED */
 	unsigned clip_ms; /* sets script environment variable CLIP 1 and after duration ms back to 0 */
+	int clip_gpio; /* positive for active high, negative for active low- sets clip_ms default 200ms if not set */
 	/* threshold detector */
 	unsigned level_sec; /* time to hold after level collases below threshold */
 	char * level_cmd; /* call this with env LEVEL=1 for on, 0 for off- eg pump into a GPIO directly */
@@ -107,6 +108,7 @@ struct audio {
 	struct timespec _clip_hold;
 	struct timespec _level_hold; /* timer to hold after level trigger */
 	char *_level_gpio_file;
+	char *_clip_gpio_file;
 	const char ** _level_sink_ports; /* array of sink names determined on open */
 };
 

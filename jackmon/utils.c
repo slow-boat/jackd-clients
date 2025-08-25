@@ -17,6 +17,7 @@
 #include <errno.h>
 #include <time.h>
 #include <wordexp.h>
+#include <sys/stat.h>
 
 #include "utils.h"
 
@@ -129,5 +130,85 @@ int systemcall(const char * command, const struct systemcall_env * env,  unsigne
     }
 
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
+}
+
+
+char * gpio_init(int gpio){
+	if(!gpio)
+		return NULL; /* no GPIO */
+
+	bool active_low = gpio < 0;
+	gpio = abs(gpio);
+
+	char * path = NULL;
+	if(asprintf(&path, "/sys/class/gpio/gpio%d", gpio) < 8)
+		goto error;
+
+	struct stat sb;
+	int exported = 0;
+	FILE * e;
+	while (exported < 5 && (stat(path, &sb) || !S_ISDIR(sb.st_mode))) {
+		if(exported)
+			goto export_wait;
+		/* export the gpio, then wait for the directory to appear */
+    	if(!((e=fopen("/sys/class/gpio/export", "w"))))
+    		goto error;
+    	if(!fprintf(e, "%d\n", gpio)){
+    		fclose(e);
+    		goto error;
+    	}
+    	fclose(e);
+export_wait:
+    	exported++;
+    	millisleep(200);
+    }
+	if(exported == 5)
+		goto error;
+	free(path);
+	path = NULL;
+
+	if(active_low){
+		if(asprintf(&path, "/sys/class/gpio/gpio%d/active_low", gpio) < 8)
+			goto error;
+    	if(!((e=fopen(path, "w"))))
+    		goto error;
+    	if (fwrite("1", sizeof(char), 1, e) != 1) {
+    		fclose(e);
+    		fprintf(stderr, "ERROR: Failed to make GPIO %d active low\n", gpio);
+    		goto error;
+    	}
+    	fclose(e);
+    	free(path);
+    	path = NULL;
+	}
+
+	/* open the file _level_gpio_file */
+	if(asprintf(&path, "/sys/class/gpio/gpio%d/value", gpio) < 8)
+		goto error;
+	if(!((e=fopen(path, "w"))))
+		goto error;
+	fclose(e);
+	return path;
+
+error:
+	if(path)
+		free(path);
+	fprintf(stderr, "ERROR: Failed to export GPIO %d\n", gpio);
+	return NULL;
+}
+
+int gpio_set(char * path, bool value){
+	if(!path)
+		return 0;
+	FILE * fp = fopen(path, "w");
+	if(!fp)
+		return 1;
+    if (fwrite(value?"1":"0", sizeof(char), 1, fp) != 1) {
+    	fprintf(stderr, "Error writing %d to GPIO value file %s", value, path);
+        fclose(fp);
+        return 1;
+    }
+    fclose(fp);
+    return 0;
 }
 

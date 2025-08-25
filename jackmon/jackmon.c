@@ -7,7 +7,6 @@
 #include <errno.h>
 #include <unistd.h>
 #include <ctype.h>
-#include <sys/stat.h>
 #include <stdio.h>
 
 #include "audio.h"
@@ -17,8 +16,6 @@ static void printhelp(void);
 static void parse_opts(int argc, char *argv[]);
 static void parse_config(int argc, char *argv[]);
 static bool parseflag(char * val);
-static int gpio_init(struct audio * audio);
-static int gpio_set(char * path, bool value);
 
 /* specify actions
  * -d debug
@@ -39,7 +36,7 @@ static int gpio_set(char * path, bool value);
 static void parse_opts(int argc, char *argv[]){
 	int o;
 	optind = 1;
-	while (((o = getopt(argc, argv, "hdNs:e:c:C:n:f:t:h:l:E::P:")) != -1)) {
+	while (((o = getopt(argc, argv, "hdNs:e:c:C:G:n:f:t:h:l:E::P:")) != -1)) {
 		switch (o) {
 		case 'h':
 			printhelp();
@@ -61,6 +58,9 @@ static void parse_opts(int argc, char *argv[]){
 			break;
 		case 'c':
 			gAudio.clip_ms=strtoul(optarg, NULL, 0);
+			break;
+		case 'G':
+			gAudio.clip_gpio=strtol(optarg, NULL, 0);
 			break;
 		case 'n':
 			gAudio.name=optarg;
@@ -163,6 +163,8 @@ static void parse_config(int argc, char *argv[]){
 			Asprintf(&gAudio.clip_cmd, "%s", val);
         }else if (!strcmp(key, "clip_ms"))
 			gAudio.clip_ms = strtoul(val, NULL, 0);
+		else if (!strcmp(key, "clip_gpio"))
+			gAudio.clip_gpio = strtol(val, NULL, 0);
 		else if (!strcmp(key, "vu_ms"))
 			gAudio.vu_ms = strtoul(val, NULL, 0);
 		else if (!strcmp(key, "vu_pipe")){
@@ -185,8 +187,8 @@ int main(int argc, char *argv[]){
 		gAudio.sources = "Built-in Audio.*:capture_*";
 
 	/* setup GPIO */
-	if(gpio_init(&gAudio))
-		return 1;
+	if((gAudio._level_gpio_file = gpio_init(gAudio.level_gpio)))
+		debug("Level GPIO %d %s\n", abs(gAudio.level_gpio), gAudio.level_gpio < 0 ? "Active Low":"Active High");
 
 	/* Set up "vox" to do something when level exceeds threshold */
 	if(gAudio.level_sinks || gAudio.level_cmd || gAudio.level_gpio){
@@ -203,9 +205,16 @@ int main(int argc, char *argv[]){
 	if(gAudio.vu_ms)
 		gAudio.rms_en = gAudio.peak_en = true;
 
-	/* todo Handle clipping */
-	if(gAudio.clip_cmd || gAudio.debug)
+	/* Handle clipping */
+	if(gAudio.clip_cmd || gAudio.debug || gAudio.clip_gpio){
 		gAudio.clip_en = true;
+		if(gAudio.clip_gpio){
+			if(!gAudio.clip_ms)
+				gAudio.clip_ms = 200; /* default 200ms for LED flash */
+			if((gAudio._clip_gpio_file = gpio_init(gAudio.clip_gpio)))
+				debug("Clip indicator GPIO %d %s\n", abs(gAudio.clip_gpio), gAudio.clip_gpio < 0 ? "Active Low":"Active High");
+		}
+	}
 
 	if(audio_init(&gAudio)){
 		debug("Error: Audio init failed\n");
@@ -248,24 +257,29 @@ int main(int argc, char *argv[]){
 			clear_timer(&gAudio._level_hold);
 		}
 		/* clip */
-		if(gAudio.clip_cmd){
+		if(gAudio.clip_en){
 			if(clip && !gAudio.disconnected){
 				set_timer(&gAudio._clip_hold, gAudio.clip_ms?:200); /* always set timer to limit calls */
 				if(clip_set < 1){
 					clip_set = 1;
-					debug("Running \"%s\" with env CLIP=1\n", gAudio.clip_cmd);
-					static const struct systemcall_env e[] = {{"CLIP" , "1" }, {NULL , NULL }};
-					systemcall(gAudio.clip_cmd, e, 100);
-				} else if (!gAudio.clip_ms)
+					if(gAudio.clip_cmd){
+						debug("Running \"%s\" with env CLIP=1\n", gAudio.clip_cmd);
+						static const struct systemcall_env e[] = {{"CLIP" , "1" }, {NULL , NULL }};
+						systemcall(gAudio.clip_cmd, e, 100);
+					}
+					gpio_set(gAudio._clip_gpio_file, true);
+				} else if (gAudio.clip_cmd && !gAudio.clip_ms)
 					systemcall(gAudio.clip_cmd, NULL, 100); /* one shot- no args */
 			} else if (!timer_poll(&gAudio._clip_hold) && clip_set){
 				clip_set = 0;
 				if (gAudio.clip_ms){
-					debug("Running \"%s\" with env CLIP=0\n", gAudio.clip_cmd);
-					static const struct systemcall_env e[] = {{"CLIP" , "0" }, {NULL , NULL }};
-					systemcall(gAudio.clip_cmd, e, 100);
+					if(gAudio.clip_cmd){
+						debug("Running \"%s\" with env CLIP=0\n", gAudio.clip_cmd);
+						static const struct systemcall_env e[] = {{"CLIP" , "0" }, {NULL , NULL }};
+						systemcall(gAudio.clip_cmd, e, 100);
+					}
+					gpio_set(gAudio._clip_gpio_file, false);
 				}
-
 			}
 		}
 
@@ -294,9 +308,8 @@ int main(int argc, char *argv[]){
 
 				/* GPIO */
 				if(gAudio._level_gpio_file) {
-					debug("GPIO %d on\n", gAudio.level_gpio);
-					if (gpio_set(gAudio._level_gpio_file, true))
-						debug("Failed tp set GPIO\n");
+					debug("GPIO %d on\n", abs(gAudio.level_gpio));
+					gpio_set(gAudio._level_gpio_file, true);
 				}
 			}
 		} else if (gAudio.level_sec && !timer_poll(&gAudio._level_hold) && threshold_set){ /* -1 (starting) or 1 */
@@ -321,9 +334,8 @@ int main(int argc, char *argv[]){
 
 			/* GPIO */
 			if(gAudio._level_gpio_file){
-				debug("GPIO %d off\n", gAudio.level_gpio);
-				if (gpio_set(gAudio._level_gpio_file, false))
-					debug("Failed tp clear GPIO\n");
+				debug("GPIO %d off\n", abs(gAudio.level_gpio));
+				gpio_set(gAudio._level_gpio_file, false);
 			}
 		}
 
@@ -348,89 +360,14 @@ static void printhelp(void) {
 		"\t-p\tname of pipe/file to stream {rms peak} pairs in dB, space separated, newline per poll event: use for VU meter\n"
 		"\t-P\tupdate rate of rms values in ms- if set without -p, this will dump to stdout\n"
 		"\t-C\tscript to run if we clip- clip detection only enabled in debug mode, or if this script is specified\n"
+		"\t-G\tCLIP GPIO to drive LED. Negative number for active low\n"
 		"\t-c\tms to call script when clip over like a one-shot, with CLIP env 1 and 0 of this instance as a jack service\n"
 		"\t\t\teg user this to set an LED or write something to a LCD front end.\n"
 		"\t-l\tthreshold in dBfs where if RMS level exceeds this, we consider the source ON\n"
 		"\t-t\thold time for threshold detection in seconds\n"
+		"\t-g\tGPIO to dive relay when threshold reached, negative number for active low\n"
 		"\t-E\tscript to run when threshold exceeded, set environment variable LEVEL to 1 or 0. Has a 500ms timeout since its blocking\n"
 		"\t-e\tsink connection regex to map sequentially when threshold is exceeded. disconnect after hold time\n"
 		"\t-N\tDon't try to reconnect if source port connection gets removed\n");
 	 exit(0);
-}
-
-static int gpio_init(struct audio * audio){
-	if(!audio->level_gpio)
-		return 0; /* no GPIO */
-
-	bool active_low = audio->level_gpio < 0;
-	audio->level_gpio = abs(audio->level_gpio);
-
-	char * path = NULL;
-	if(asprintf(&path, "/sys/class/gpio/gpio%d", audio->level_gpio) < 8)
-		goto error;
-
-	struct stat sb;
-	int exported = 0;
-	FILE * e;
-	while (exported < 5 && (stat(path, &sb) || !S_ISDIR(sb.st_mode))) {
-		if(exported)
-			goto export_wait;
-		/* export the gpio, then wait for the directory to appear */
-    	if(!((e=fopen("/sys/class/gpio/export", "w"))))
-    		goto error;
-    	if(!fprintf(e, "%d\n", audio->level_gpio)){
-    		fclose(e);
-    		goto error;
-    	}
-    	fclose(e);
-export_wait:
-    	exported++;
-    	millisleep(200);
-    }
-	if(exported == 5)
-		goto error;
-	free(path);
-	path = NULL;
-
-	if(active_low){
-		if(asprintf(&path, "/sys/class/gpio/gpio%d/active_low", audio->level_gpio) < 8)
-			goto error;
-    	if(!((e=fopen(path, "w"))))
-    		goto error;
-    	if (fwrite("1", sizeof(char), 1, e) != 1) {
-    		fclose(e);
-    		fprintf(stderr, "ERROR: Failed to make GPIO %d active low\n", audio->level_gpio);
-    		goto error;
-    	}
-    	fclose(e);
-    	free(path);
-    	path = NULL;
-	}
-
-	/* open the file _level_gpio_file */
-	if(asprintf(&path, "/sys/class/gpio/gpio%d/value", audio->level_gpio) < 8)
-		goto error;
-	if(!((e=fopen(path, "w"))))
-		goto error;
-	fclose(e);
-	debug("Using GPIO %d %s\n", audio->level_gpio, active_low ? "Active Low":"Active High");
-	audio->_level_gpio_file = path;
-	return 0;
-
-error:
-	if(path)
-		free(path);
-	fprintf(stderr, "ERROR: Failed to export GPIO %d\n", audio->level_gpio);
-	return 1;
-}
-
-static int gpio_set(char * path, bool value){
-	FILE * fp = fopen(path, "w");
-    if (fwrite(value?"1":"0", sizeof(char), 1, fp) != 1) {
-    	fprintf(stderr, "Error writing %d to GPIO value file %s", value, path);
-        fclose(fp);
-        return 1;
-    }
-    fclose(fp);
-    return 0;
 }
