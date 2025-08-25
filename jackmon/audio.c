@@ -129,8 +129,11 @@ int audio_init(struct audio * audio) {
     for (int i = 0; audio->source_ports[i]; i++)
     	audio->channels++;
 
-    if(audio->level_sinks)
-    	audio->_level_sink_ports = jack_get_ports(audio->jclient, audio->level_sinks, NULL, JackPortIsInput);
+    if(audio->level_sinks &&
+    		((audio->_level_sink_ports = jack_get_ports(audio->jclient, audio->level_sinks, NULL, JackPortIsInput)))) {
+    	for(int i = 0; audio->_level_sink_ports[i]; i++)
+    		debug("Route source %d -> sink %s when threshold is reached\n", i+1, audio->_level_sink_ports[i]);
+    }
 
     /* allocate structs */
 	if(!((audio->chan = calloc(audio->channels, sizeof(struct chan)))))
