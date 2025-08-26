@@ -243,6 +243,7 @@ int main(int argc, char *argv[]){
 
 	int threshold_set = -1; /* init */
 	int clip_set = -1;
+	bool vu_printing = false;
 	while(true) {
 		int events = audio_poll(&gAudio, gAudio.vu_ms ?:1457); /* poll at VU rate or a prime number reasonable amount */
 		if(events < 0){
@@ -251,14 +252,23 @@ int main(int argc, char *argv[]){
 		}
 		ftype trigger_level=0;
 		bool clip = false;
-		bool vuevent = false;
+
+		bool vu_valid=false;
+		if(gAudio.vu_ms){
+			for (int i=0; i < gAudio.channels; i++){
+				struct chan * c = &gAudio.chan[i];
+				if((min_level < c->rms_val || min_level < c->peak_val)){
+					vu_valid=vu_printing=true;
+				}
+			}
+		}
+
 		for (int i=0; i < gAudio.channels; i++){
 			struct chan * c = &gAudio.chan[i];
-			if(gAudio.vu_ms && (min_level < c->rms_val || min_level < c->peak_val)){
-				if(!gAudio.vu_pretty){
-					vuevent = true;
+			if(vu_printing){ /* always print all channels */
+				if(!gAudio.vu_pretty)
 					vu_print(&gAudio, "%0.1f %0.1f ", 20*flog(c->rms_val), 20*flog(c->peak_val));
-				} else
+				else
 					vu_print_pretty(&gAudio, 20*flog(c->rms_val), 20*flog(c->peak_val), i);
 			}
 
@@ -272,8 +282,12 @@ int main(int argc, char *argv[]){
 			if(gAudio.level_sec && c->rms_val >= gAudio.level_thres && c->rms_val > trigger_level)
 				trigger_level = c->rms_val;
 		}
-		if(vuevent)
-			vu_print(&gAudio, "\n");
+		if(vu_printing){
+			if(!gAudio.vu_pretty)
+				vu_print(&gAudio, "\n");
+			if(!vu_valid)
+				vu_printing = false;
+		}
 
 		if(gAudio.disconnected){ /* reset script timers so we turn stuff off immediately */
 			clear_timer(&gAudio._clip_hold);
