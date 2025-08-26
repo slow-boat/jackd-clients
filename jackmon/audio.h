@@ -75,8 +75,10 @@ struct audio {
 	bool noreconnect; /* dont try to reconnect if input link disconnected */
 	char * vu_pipe; /* name of file to write VU stream */
 	unsigned vu_ms; /* ms poll rate for VU updates- events will update faster */
+	unsigned vu_peak_hold_ms; /* ms to hold peak value */
 	char * clip_cmd; /* script to run -eg trigger a one-shot LED */
 	unsigned clip_ms; /* sets script environment variable CLIP 1 and after duration ms back to 0 */
+	unsigned clip_samples; /* number of consecutive clamped samples to trigger clip */
 	int clip_gpio; /* positive for active high, negative for active low- sets clip_ms default 200ms if not set */
 	/* threshold detector */
 	unsigned level_sec; /* time to hold after level collases below threshold */
@@ -84,18 +86,17 @@ struct audio {
 	ftype level_thres; /* threshold for setting level/hold */
 	int level_gpio; /* sysfs GPIO to control level... negative means active low */
 
-
 	/* which functions are enabled based on config */
 	bool rms_en; /* enable rms calculations */
-	bool peak_en; /* enable peak calculations */
 	bool clip_en; /* enable clipping detection */
+	bool vu_pretty;
 
 	/* evaluated */
 	jack_client_t * jclient;
 	/* from connection */
 	ftype samplerate;
 	const char ** source_ports; /* list of source ports we are connecting to */
-	FILE * vu; /* file to write VU- default is stdout */
+	FILE * _vu; /* file to write VU instead of stdout */
 	bool disconnected; /* flag indicating source port disconnected */
 	bool jack_activated; /* flag that client is active */
 	struct chan * chan; /* pointer to array of stats- one per channel */
@@ -123,7 +124,7 @@ static inline void run_biquad(ftype x, struct biquad * b){
 	}
 }
 
-void rms_init(struct rms * rms, double risetime, double samplerate);
+void rms_init(struct rms * rms, double samplerate);
 
 /* return 1 if RMS value becomes ready */
 static inline int rms_run(struct rms * rms, ftype sample) {
@@ -241,5 +242,7 @@ void vu_print(struct audio * audio, const char* fmt, ...);
 void jack_wait_for_source_ports(struct audio * audio);
 void jack_connect_source_ports(struct audio * audio);
 void jack_check_source_ports(struct audio * audio);
+void vu_print_header(struct audio * audio);
+void vu_print_pretty(struct audio * audio, ftype rms, ftype peak, int chan);
 
 #endif /* AUDIO_H_ */

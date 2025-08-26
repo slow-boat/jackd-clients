@@ -43,6 +43,7 @@ static inline bool timespec_isset(const struct timespec *ts) {
 	return (ts && (ts->tv_sec || ts->tv_nsec));
 }
 
+/* wrap up asprintf to exit on no memory - its catastrophic, and this way the code is more readable */
 #define Asprintf(...) { if(asprintf(__VA_ARGS__) <= 0) exit(1); }
 
 /* return time for timeout */

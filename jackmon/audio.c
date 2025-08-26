@@ -38,11 +38,9 @@ void init_lowpass_biquad(double fc, double fs, struct biquad * b)
 }
 
 /* can be reinitialised */
-void rms_init(struct rms * rms, double risetime, double samplerate){
-	if(!risetime)
-		return;
+void rms_init(struct rms * rms, double samplerate){
 	rms->en = true;
-	double fc = 0.175 / risetime; /* estimate fc for 99% risetime */
+	double fc = 3.0; /* -3dB at 3Hz emulates mechanical meter smoothing */
 	init_lowpass_biquad(fc, samplerate, &rms->f);
 }
 
@@ -142,11 +140,14 @@ int audio_init(struct audio * audio) {
 	/* register ports per channel */
 	for (int i = 0; i < audio->channels; i++) {
 		struct chan * c = &audio->chan[i];
-		peak_init(&c->peak, 0.001, (int)audio->samplerate, 1500); /* hold 1.5 seconds. decay 1 seconds to -60dB */
+		if(audio->vu_peak_hold_ms)
+			peak_init(&c->peak, fpow(10.0, -65.0/20.0),
+					(int)audio->samplerate*audio->vu_peak_hold_ms/1000,
+					audio->vu_peak_hold_ms); /* decay next peak to -65dB in vu_peak_hold_ms */
 		if(audio->clip_en)
-			clip_init(&c->clip, 3); /* 3 consecutive samples over >=1.0 means clip */
+			clip_init(&c->clip, audio->clip_samples);
 		if(audio->rms_en)
-			rms_init(&c->rms, 0.05, (double)audio->samplerate); /* 50ms rise... has longer decay */
+			rms_init(&c->rms, (double)audio->samplerate);
 
 		char *in="";
 		if(!asprintf(&in, "%d", i+1) ||
@@ -236,25 +237,53 @@ void vu_print(struct audio * audio, const char* fmt, ...){
 	if(!gAudio.vu_ms)
 		return;
 
-	if(!gAudio.vu && gAudio.vu_pipe){
-		if(!((gAudio.vu = fopen(gAudio.vu_pipe, "w+"))))
+	if(!gAudio._vu && gAudio.vu_pipe){
+		if(!((gAudio._vu = fopen(gAudio.vu_pipe, "w+"))))
 			return;
 	} else
-		gAudio.vu = stdout;
+		gAudio._vu = stdout;
 
 	va_list args;
 
 	va_start(args, fmt);
-	int r = vfprintf(gAudio.vu, fmt, args);
+	int r = vfprintf(gAudio._vu, fmt, args);
 	va_end (args);
 	if(r >= 0)
 		return;
 
 	/* error */
 	if(gAudio.vu_pipe){
-		fclose(gAudio.vu);
-		gAudio.vu = NULL;
+		fclose(gAudio._vu);
+		gAudio._vu = NULL;
 	}
+}
+
+/* 40 cols */
+void vu_print_header(struct audio * audio){
+	vu_print(audio, "\33[2J\33[H\e[?25l|-80dB    |-60      |-40      |-20    0|\n\n");
+}
+
+void vu_print_pretty(struct audio * audio, ftype rms, ftype peak, int chan){
+	int rms_pos = rms < -78.0 ? 0 : (int)(80.0+rms)/2; /* 0 to 40: where 0 is empty, 40 is char 39 */
+	int peak_pos = rms < -78.0 ? 0 : (int)(80.0+peak)/2; /* 0 to 40: where 0 is empty, 40 is char 39 */
+	char line[41];
+
+	int i = 0;
+	if(rms_pos > peak_pos)
+		peak_pos = rms_pos;
+	while(i < peak_pos){
+		line[i] = i == (peak_pos-1) ? '|' : i > rms_pos ?' ' : '*';
+		i++;
+	}
+	if(i==40)
+		line[39]='X';
+	else if(!i)
+		line[i++]='-';
+	line[i]=0;
+	if(!chan) /* first channel */
+		vu_print(audio, "\33[H\n\x1b[2K%s", line); /* top left, one line down, clear line */
+	else
+		vu_print(audio, "\n\r\x1b[2K%s", line); /* one line down, clear line */
 }
 
 /* wait for specified port list to be available */

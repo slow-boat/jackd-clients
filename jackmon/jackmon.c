@@ -163,13 +163,18 @@ static void parse_config(int argc, char *argv[]){
 			Asprintf(&gAudio.clip_cmd, "%s", val);
         }else if (!strcmp(key, "clip_ms"))
 			gAudio.clip_ms = strtoul(val, NULL, 0);
-		else if (!strcmp(key, "clip_gpio"))
+        else if (!strcmp(key, "clip_samples"))
+        	gAudio.clip_samples = strtoul(val, NULL, 0);
+        else if (!strcmp(key, "clip_gpio"))
 			gAudio.clip_gpio = strtol(val, NULL, 0);
 		else if (!strcmp(key, "vu_ms"))
 			gAudio.vu_ms = strtoul(val, NULL, 0);
+		else if (!strcmp(key, "vu_peak_hold_ms"))
+			gAudio.vu_peak_hold_ms = strtoul(val, NULL, 0);
 		else if (!strcmp(key, "vu_pipe")){
 		    Asprintf(&gAudio.vu_pipe, "%s", val);
-		}
+		} else if (!strcmp(key, "vu_pretty"))
+        	gAudio.vu_pretty = parseflag(val);
         free(key);
     }
     fclose(fp);
@@ -193,7 +198,7 @@ int main(int argc, char *argv[]){
 	/* Set up "vox" to do something when level exceeds threshold */
 	if(gAudio.level_sinks || gAudio.level_cmd || gAudio.level_gpio){
 		/* lets set up some defaults for RMS detection */
-		gAudio.rms_en = true;
+		gAudio.rms_en = true; /* level needs rms */
 		if(!gAudio.level_sec)
 			gAudio.level_sec = 60; /* 1 minute hold */
 		if(!gAudio.level_thres)
@@ -202,18 +207,33 @@ int main(int argc, char *argv[]){
 		gAudio.level_sec = 0; /* use zero timeout to flag we don't use the trigger/hold feature */
 
 	/* VU meterage - uses RMS and peak */
-	if(gAudio.vu_ms)
-		gAudio.rms_en = gAudio.peak_en = true;
+	if(gAudio.vu_pipe && !gAudio.vu_ms)
+		gAudio.vu_ms = 50; /* 50ms update rate by default */
+
+	if(gAudio.vu_ms){
+		if(!gAudio.vu_peak_hold_ms)
+			gAudio.vu_peak_hold_ms = 800; /* peak hold for 800ms */
+		gAudio.rms_en = true; /* vu needs rms and peak */
+		if(gAudio.vu_pretty)
+			vu_print_header(&gAudio);
+	}
 
 	/* Handle clipping */
 	if(gAudio.clip_cmd || gAudio.debug || gAudio.clip_gpio){
 		gAudio.clip_en = true;
+		if(!gAudio.clip_samples)
+			gAudio.clip_samples = 4;
 		if(gAudio.clip_gpio){
 			if(!gAudio.clip_ms)
 				gAudio.clip_ms = 200; /* default 200ms for LED flash */
 			if((gAudio._clip_gpio_file = gpio_init(gAudio.clip_gpio)))
 				debug("Clip indicator GPIO %d %s\n", abs(gAudio.clip_gpio), gAudio.clip_gpio < 0 ? "Active Low":"Active High");
 		}
+	}
+
+	if(!gAudio.rms_en && !gAudio.clip_en) {
+		fprintf(stderr, "Empty Configuration- no actions configured\n");
+		return 1;
 	}
 
 	if(audio_init(&gAudio)){
@@ -235,8 +255,11 @@ int main(int argc, char *argv[]){
 		for (int i=0; i < gAudio.channels; i++){
 			struct chan * c = &gAudio.chan[i];
 			if(gAudio.vu_ms && (min_level < c->rms_val || min_level < c->peak_val)){
-				vuevent = true;
-				vu_print(&gAudio, "%0.1f %0.1f ", 20*flog(c->rms_val), 20*flog(c->peak_val));
+				if(!gAudio.vu_pretty){
+					vuevent = true;
+					vu_print(&gAudio, "%0.1f %0.1f ", 20*flog(c->rms_val), 20*flog(c->peak_val));
+				} else
+					vu_print_pretty(&gAudio, 20*flog(c->rms_val), 20*flog(c->peak_val), i);
 			}
 
 			if(c->clip_event) {
@@ -346,7 +369,7 @@ int main(int argc, char *argv[]){
 	/* cleanup- kind of redundant */
 	debug("Closing\n");
 	if(gAudio.vu_pipe)
-		fclose(gAudio.vu);
+		fclose(gAudio._vu);
 	jack_client_close (gAudio.jclient);
 	exit (0);
 }
