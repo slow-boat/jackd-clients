@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <ctype.h>
 #include <stdio.h>
+#include <stdbool.h>
 
 #include "audio.h"
 #include "utils.h"

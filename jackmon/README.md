@@ -16,10 +16,13 @@ Config file with notes is in [install directory](./install/etc/jackmon.conf)
 - depends on pipewire-jack backend installed and running
 - multi-instance systemd units to define each jackmon function
 
-Initial configuration after building binary *jackmon* for the platform (this will get integrated into make with make install)
+Build the binaries and install:
 ```
-sudo cp -r install/* /
-sudo cp jackmon /usr/sbin/
+sudo apt install git build-essential libjack-jackd2-dev
+git clone https://github.com/slow-boat/jackd-clients.git
+cd jackd-clients/jackmon
+make
+sudo make install
 ```
 
 ### Create the instance
@@ -36,3 +39,41 @@ systemctl --user enable jackmon@input.service
 ```
 
 This will run from boot as soon as pipewire is up.
+
+# Examples
+Using a **pi0w running raspbian**, we define three GPIOs, active high. This has two service units running:
+
+- *input* unit switches analogue input to DSP/convolver input, and drives a gpio when its active to turn on an orange LED.
+- *amp* unit simply turns a GPIO on and off.
+- both units use a 3rd GPIO as a clipping indicator
+
+GPIOS start at 512
+
+- *clip* GPIO16 - pin36 - i=528
+- *input_on* GPIO12 - pin32 - i=524 
+- *amp_on* GPIO26 - pin37 - i=538
+
+Go through build and install, then run this to customise and start:
+```
+cat << EOF > ~/input.conf
+debug = 1
+sources = Built-in Audio Stereo:capture_*
+clip_gpio = 528
+level_gpio = 524
+level_sinks = Convolver Sink:playback_*
+level_thres = -70.0
+level_sec = 60
+EOF
+
+cat << EOF > ~/amp.conf
+debug = 1
+sources = Built-in Audio Stereo:monitor_*
+clip_gpio = 528
+level_gpio = 538
+level_thres = -70.0
+level_sec = 180
+EOF
+sudo mv ~/input.conf ~/amp.conf /etc/jackmon.d/
+sudo systemctl daemon-reload
+systemctl --user enable --now jackmon@input.service jackmon@amp.service
+```
