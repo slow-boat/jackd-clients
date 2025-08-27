@@ -1,0 +1,21 @@
+[Unit]
+Description=Jack Monitor Instance %i
+After=pipewire.service
+Wants=pipewire.service
+
+[Service]
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+NoNewPrivileges=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+Type=simple
+ExecStart=/usr/sbin/jackmon -n jackmon-%i -f /etc/jackmon.d/%i.conf
+Restart=on-failure
+RestartPreventExitStatus=2
+Slice=session.slice
+Environment=GIO_USE_VFS=local
+
+[Install]
+WantedBy=pipewire.service
