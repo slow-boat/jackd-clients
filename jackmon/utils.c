@@ -206,7 +206,7 @@ int gpio_set(int gpio, bool value){
 		goto nomem;
 
 	char * pidfile;
-	if(asprintf(&path, "/run/gpio/gpio%d", abs(gpio)) < 1)
+	if(asprintf(&path, "/dev/shm/gpio%d", abs(gpio)) < 1)
 		goto nomem;
 	bool retry = 0;
 
