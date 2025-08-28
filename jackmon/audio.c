@@ -40,7 +40,7 @@ void init_lowpass_biquad(double fc, double fs, struct biquad * b)
 /* can be reinitialised */
 void rms_init(struct rms * rms, double samplerate){
 	rms->en = true;
-	double fc = 3.0; /* -3dB at 3Hz emulates mechanical meter smoothing */
+	double fc = 6.0; /* -3dB at 6Hz emulates mechanical meter smoothing */
 	init_lowpass_biquad(fc, samplerate, &rms->f);
 }
 
@@ -258,9 +258,15 @@ void vu_print(struct audio * audio, const char* fmt, ...){
 	}
 }
 
-/* 40 cols */
+/* 40 cols*/
 void vu_print_header(struct audio * audio){
+	/* top left, clear page, disable cursor */
 	vu_print(audio, "\33[2J\33[H\e[?25l|-80dB    |-60      |-40      |-20    0|\n\n");
+}
+
+void vu_console_restore(struct audio * audio){
+	/* top left, clear page, disable cursor */
+	vu_print(audio, "\33[2J\33[H\e[?25h");
 }
 
 void vu_print_pretty(struct audio * audio, ftype rms, ftype peak, int chan){

@@ -9,6 +9,7 @@
 #include <ctype.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <signal.h>
 
 #include "audio.h"
 #include "utils.h"
@@ -37,7 +38,7 @@ static bool parseflag(char * val);
 static void parse_opts(int argc, char *argv[]){
 	int o;
 	optind = 1;
-	while (((o = getopt(argc, argv, "hdNs:e:c:C:G:n:f:t:h:l:E::P:")) != -1)) {
+	while (((o = getopt(argc, argv, "hdNvs:e:c:C:G:n:f:t:h:l:E:p:P:")) != -1)) {
 		switch (o) {
 		case 'h':
 			printhelp();
@@ -47,6 +48,9 @@ static void parse_opts(int argc, char *argv[]){
 			break;
 		case 'N':
 			gAudio.noreconnect = true;
+			break;
+		case 'v':
+			gAudio.vu_pretty = true;
 			break;
 		case 's':
 			gAudio.sources=optarg;
@@ -187,7 +191,17 @@ done:
 		gAudio.name = "jackmon";
 }
 
+static void sig_cleanup(int signum){
+	if(gAudio.vu_pretty){
+		vu_console_restore(&gAudio);
+		debug("Restored console\n");
+	}
+	exit(0);
+}
+
 int main(int argc, char *argv[]){
+    signal(SIGINT, sig_cleanup);   // Ctrl+C
+    signal(SIGTERM, sig_cleanup);  // kill command
 	parse_config(argc, argv);
 
 	/* set defaults- analog input port capture for host... in pipewire naming convention */
@@ -210,7 +224,7 @@ int main(int argc, char *argv[]){
 		gAudio.level_sec = 0; /* use zero timeout to flag we don't use the trigger/hold feature */
 
 	/* VU meterage - uses RMS and peak */
-	if(gAudio.vu_pipe && !gAudio.vu_ms)
+	if((gAudio.vu_pipe || gAudio.vu_pretty) && !gAudio.vu_ms)
 		gAudio.vu_ms = 50; /* 50ms update rate by default */
 
 	if(gAudio.vu_ms){

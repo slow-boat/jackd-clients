@@ -233,8 +233,17 @@ static inline int audio_chan_run(struct chan * s, ftype sample){
 }
 
 extern struct audio gAudio;
-#define debug(fmt, ...) ({ if(gAudio.debug) \
-	fprintf(stderr, fmt, ## __VA_ARGS__); })
+
+/* include jack name in debug messages for journalctl */
+static inline void debug(const char* fmt, ...){
+	if(!gAudio.debug)
+		return;
+	fprintf(stderr, "(%s) ", gAudio.name);
+	va_list args;
+	va_start(args, fmt);
+	vfprintf(stderr, fmt, args);
+	va_end (args);
+}
 
 int audio_init(struct audio * audio);
 int audio_poll(struct audio * audio, unsigned period_ms);
@@ -243,6 +252,7 @@ void jack_wait_for_source_ports(struct audio * audio);
 void jack_connect_source_ports(struct audio * audio);
 void jack_check_source_ports(struct audio * audio);
 void vu_print_header(struct audio * audio);
+void vu_console_restore(struct audio * audio);
 void vu_print_pretty(struct audio * audio, ftype rms, ftype peak, int chan);
 
 #endif /* AUDIO_H_ */
