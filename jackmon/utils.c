@@ -182,7 +182,7 @@ int gpio_init(int gpio){
 		goto done;
 
 	/* track GPIO set owner */
-	mkdir("/run/gpio", 0755); /* ignore response */
+	mkdir("/dev/shm/gpio", 0755); /* ignore response */
 
 	/* try set to off by default if we just exported it- otherwise assume its correct */
 	if(!export && gpio_set(gpio, 0) < 0)
@@ -206,7 +206,7 @@ int gpio_set(int gpio, bool value){
 		goto nomem;
 
 	char * pidfile;
-	if(asprintf(&path, "/dev/shm/gpio%d", abs(gpio)) < 1)
+	if(asprintf(&path, "/dev/shm/gpio/gpio%d", abs(gpio)) < 1)
 		goto nomem;
 	bool retry = 0;
 
@@ -225,8 +225,11 @@ try_export:;
 				err = write_sysfs(path, "0");
 		}
 		fclose(pf);
-	} else /* cant open file so just smash the GPIO */
+	} else {/* cant open file so just smash the GPIO */
+		if(value)
+			fprintf(stderr, "Failed to open GPIO track file %s for writing\n", pidfile);
 		err = write_sysfs(path, value?"1":"0");
+	}
 
 	if(err < 0 && !retry){ /* try to export it */
 		retry = true;
