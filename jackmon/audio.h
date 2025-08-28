@@ -108,8 +108,6 @@ struct audio {
 
 	struct timespec _clip_hold;
 	struct timespec _level_hold; /* timer to hold after level trigger */
-	char *_level_gpio_file;
-	char *_clip_gpio_file;
 	const char ** _level_sink_ports; /* array of sink names determined on open */
 };
 

@@ -19,6 +19,7 @@
 #include <wordexp.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <unistd.h>
 
 #include "utils.h"
 
@@ -150,20 +151,20 @@ static int write_sysfs(const char *path, const char *value)
 }
 
 #define SYSFS_GPIO_DIR "/sys/class/gpio"
-char * gpio_init(int gpio){
+int gpio_init(int gpio){
 	if(!gpio)
-		return NULL; /* no GPIO */
+		return -1; /* no GPIO */
+	int err = -1;
 
 	bool active_low = gpio < 0;
 	gpio = abs(gpio);
 
-	char * path = NULL;
 	char * s = NULL;
 	if(asprintf(&s, "%d", gpio) < 1)
 		goto nomem;
 
-	int e; /* track export to see if we are initialising it here */
-	if(((e = write_sysfs(SYSFS_GPIO_DIR "/export", s))) < 0)
+	int export; /* track export to see if we are initialising it here */
+	if(((export = write_sysfs(SYSFS_GPIO_DIR "/export", s))) < 0)
 		goto done;
 	free(s);
 
@@ -180,25 +181,69 @@ char * gpio_init(int gpio){
 	if(write_sysfs(s, active_low?"1":"0") < 0)
 		goto done;
 
-	/* get path to value file */
-	if(asprintf(&path, SYSFS_GPIO_DIR "/gpio%d/value", gpio) < 1)
-		goto nomem;
+	/* track GPIO set owner */
+	mkdir("/run/gpio", 0755); /* ignore response */
 
-	/* set to off by default if we just exported it- otherwise assume its correct */
-	if(!e && write_sysfs(path, "0") < 0)
+	/* try set to off by default if we just exported it- otherwise assume its correct */
+	if(!export && gpio_set(gpio, 0) < 0)
 		goto done;
+
+	err = 0;
 
 done:
 	if(s)
 		free(s);
-	return path;
+	return err;
 
 nomem:
 	perror("ERROR: out of memory");
 	exit(1);
 }
 
-int gpio_set(char * path, bool value){
-	return write_sysfs(path, value?"1":"0");
+int gpio_set(int gpio, bool value){
+	char * path;	/* get path to value file */
+	if(asprintf(&path, SYSFS_GPIO_DIR "/gpio%d/value", abs(gpio)) < 1)
+		goto nomem;
+
+	char * pidfile;
+	if(asprintf(&path, "/run/gpio/gpio%d", abs(gpio)) < 1)
+		goto nomem;
+	bool retry = 0;
+
+try_export:;
+	int err = -1;
+	FILE * pf = fopen(pidfile, value ? "w":"r");
+	if(pf){ /* we've used it before or are setting it to 1*/
+		int pid = getpid();
+		if(value){
+			/* set- write pid to gpio tracking file and set gpio */
+			fprintf(pf, "%d", pid);
+			err = write_sysfs(path, "1");
+		} else { /* read back the pid that last set the gpio, and only clear if it was us */
+			int rpid;
+			if(!fscanf(pf, "%d", &rpid) || rpid == pid) /* or if we cant read the pid */
+				err = write_sysfs(path, "0");
+		}
+		fclose(pf);
+	} else /* cant open file so just smash the GPIO */
+		err = write_sysfs(path, value?"1":"0");
+
+	if(err < 0 && !retry){ /* try to export it */
+		retry = true;
+		if((err=gpio_init(gpio)))
+			goto done;
+		goto try_export;
+	}
+
+done:
+	if (path)
+		free(path);
+	if(pidfile)
+		free(pidfile);
+
+	return err;
+nomem:
+	perror("ERROR: out of memory");
+	exit(1);
 }
 

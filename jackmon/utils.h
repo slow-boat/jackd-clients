@@ -88,6 +88,6 @@ struct systemcall_env {
 };
 
 int systemcall(const char * command, const struct systemcall_env * env,  unsigned timeout_ms);
-char * gpio_init(int gpio);
-int gpio_set(char * path, bool value);
+int gpio_init(int gpio);
+int gpio_set(int gpio, bool value);
 #endif /* UTILS_H_ */
