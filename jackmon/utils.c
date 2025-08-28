@@ -18,6 +18,7 @@
 #include <time.h>
 #include <wordexp.h>
 #include <sys/stat.h>
+#include <fcntl.h>
 
 #include "utils.h"
 
@@ -132,7 +133,23 @@ int systemcall(const char * command, const struct systemcall_env * env,  unsigne
     return WIFEXITED(status) ? WEXITSTATUS(status) : -1;
 }
 
+/* return -1 for open error, 1 for write error, 0 for OK */
+static int write_sysfs(const char *path, const char *value)
+{
+    int fd = open(path, O_WRONLY);
+    if (fd < 0) {
+        fprintf(stderr, "Failed to open %s\n", path);
+        return -1;
+    }
+    if (write(fd, value, strlen(value)) < 0) {
+        close(fd);
+        return 1;
+    }
+    close(fd);
+    return 0;
+}
 
+#define SYSFS_GPIO_DIR "/sys/class/gpio"
 char * gpio_init(int gpio){
 	if(!gpio)
 		return NULL; /* no GPIO */
@@ -141,74 +158,47 @@ char * gpio_init(int gpio){
 	gpio = abs(gpio);
 
 	char * path = NULL;
-	if(asprintf(&path, "/sys/class/gpio/gpio%d", gpio) < 8)
-		goto error;
+	char * s = NULL;
+	if(asprintf(&s, "%d", gpio) < 1)
+		goto nomem;
 
-	struct stat sb;
-	int exported = 0;
-	FILE * e;
-	while (exported < 5 && (stat(path, &sb) || !S_ISDIR(sb.st_mode))) {
-		if(exported)
-			goto export_wait;
-		/* export the gpio, then wait for the directory to appear */
-    	if(!((e=fopen("/sys/class/gpio/export", "w"))))
-    		goto error;
-    	if(!fprintf(e, "%d\n", gpio)){
-    		fclose(e);
-    		goto error;
-    	}
-    	fclose(e);
-export_wait:
-    	exported++;
-    	millisleep(200);
-    }
-	if(exported == 5)
-		goto error;
-	free(path);
-	path = NULL;
+	int e; /* track export to see if we are initialising it here */
+	if(((e = write_sysfs(SYSFS_GPIO_DIR "/export", s))) < 0)
+		goto done;
+	free(s);
 
-	if(active_low){
-		if(asprintf(&path, "/sys/class/gpio/gpio%d/active_low", gpio) < 8)
-			goto error;
-    	if(!((e=fopen(path, "w"))))
-    		goto error;
-    	if (fwrite("1", sizeof(char), 1, e) != 1) {
-    		fclose(e);
-    		fprintf(stderr, "ERROR: Failed to make GPIO %d active low\n", gpio);
-    		goto error;
-    	}
-    	fclose(e);
-    	free(path);
-    	path = NULL;
-	}
+	if(asprintf(&s, SYSFS_GPIO_DIR "/gpio%d/direction", gpio) < 8)
+		goto nomem;
 
-	/* open the file _level_gpio_file */
-	if(asprintf(&path, "/sys/class/gpio/gpio%d/value", gpio) < 8)
-		goto error;
-	if(!((e=fopen(path, "w"))))
-		goto error;
-	fclose(e);
+	if(write_sysfs(s, "out") < 0)
+		goto done;
+	free(s);
+
+	if(asprintf(&s, SYSFS_GPIO_DIR "/gpio%d/active_low", gpio) < 8)
+		goto nomem;
+
+	if(write_sysfs(s, active_low?"1":"0") < 0)
+		goto done;
+
+	/* get path to value file */
+	if(asprintf(&path, SYSFS_GPIO_DIR "/gpio%d/value", gpio) < 1)
+		goto nomem;
+
+	/* set to off by default if we just exported it- otherwise assume its correct */
+	if(!e && write_sysfs(path, "0") < 0)
+		goto done;
+
+done:
+	if(s)
+		free(s);
 	return path;
 
-error:
-	if(path)
-		free(path);
-	fprintf(stderr, "ERROR: Failed to export GPIO %d\n", gpio);
-	return NULL;
+nomem:
+	perror("ERROR: out of memory");
+	exit(1);
 }
 
 int gpio_set(char * path, bool value){
-	if(!path)
-		return 0;
-	FILE * fp = fopen(path, "w");
-	if(!fp)
-		return 1;
-    if (fwrite(value?"1":"0", sizeof(char), 1, fp) != 1) {
-    	fprintf(stderr, "Error writing %d to GPIO value file %s", value, path);
-        fclose(fp);
-        return 1;
-    }
-    fclose(fp);
-    return 0;
+	return write_sysfs(path, value?"1":"0");
 }
 
