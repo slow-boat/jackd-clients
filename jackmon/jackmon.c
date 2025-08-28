@@ -110,8 +110,10 @@ static void parse_config(int argc, char *argv[]){
 
 	/* try to open config file and parse it */
     FILE *fp = fopen(gAudio.config, "r");
-    if (!fp)
-    	goto done;
+    if (!fp){
+    	fprintf(stderr, "ERROR: Can't read config file %s\n", gAudio.config);
+    	exit(2); /* code to tell systemd to not try to restart */
+    }
 
     debug("reading config file %s\n", gAudio.config);
 
@@ -234,7 +236,7 @@ int main(int argc, char *argv[]){
 
 	if(!gAudio.rms_en && !gAudio.clip_en) {
 		fprintf(stderr, "Empty Configuration- no actions configured\n");
-		return 1;
+		return 2;
 	}
 
 	if(audio_init(&gAudio)){
