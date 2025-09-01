@@ -90,4 +90,9 @@ struct systemcall_env {
 int systemcall(const char * command, const struct systemcall_env * env,  unsigned timeout_ms);
 int gpio_init(int gpio);
 int gpio_set(int gpio, bool value);
+
+int fifo_open(const char *path);
+void fifo_close(int fd);
+int fifo_printf(int fd, const char *fmt, ...);
+
 #endif /* UTILS_H_ */

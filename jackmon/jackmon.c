@@ -399,8 +399,7 @@ int main(int argc, char *argv[]){
 
 	/* cleanup- kind of redundant */
 	debug("Closing\n");
-	if(gAudio.vu_pipe)
-		fclose(gAudio._vu);
+	fifo_close(gAudio.h_vu_pipe);
 	jack_client_close (gAudio.jclient);
 	exit (0);
 }

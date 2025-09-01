@@ -17,6 +17,7 @@ Config file with notes is in [install directory](./install/etc/jackmon.conf)
 - multi-instance systemd units to define each jackmon function
 
 Build the binaries and install:
+
 ```
 sudo apt install git build-essential libjack-jackd2-dev
 git clone https://github.com/slow-boat/jackd-clients.git
@@ -27,11 +28,13 @@ sudo make install
 
 ### Create the instance
 Lets call it *input*
+
 ```
 sudo cp /etc/jackmon.conf /etc/jackmon.d/input.conf
 ```
 
 Edit `/etc/jackmon.d/input.conf` as required
+
 ```
 sudo systemctl daemon-reload
 systemctl --user start jackmon@input.service
@@ -54,6 +57,7 @@ GPIOS start at 512
 - *amp_on* GPIO26 - pin37 - i=538
 
 Go through build and install, then run this to customise and start:
+
 ```
 cat << EOF > ~/input.conf
 debug = 1
@@ -77,3 +81,14 @@ sudo mv ~/input.conf ~/amp.conf /etc/jackmon.d/
 sudo systemctl daemon-reload
 systemctl --user enable --now jackmon@input.service jackmon@amp.service
 ```
+
+Using pretty vu `vu_pretty = 1` the console looks something like this:
+
+```
+|-80dB    |-60      |-40      |-20    0|
+****************************|
+************************  |
+```
+
+Note that each refresh redraws all but the first line. It resets the console top left, and clears/rewrites line 2 and 3 (..4 5 etc depending on number of channels.
+

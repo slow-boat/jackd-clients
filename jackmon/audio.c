@@ -236,26 +236,22 @@ static void jack_shutdown (void *arg) {
 void vu_print(struct audio * audio, const char* fmt, ...){
 	if(!gAudio.vu_ms)
 		return;
-
-	if(!gAudio._vu && gAudio.vu_pipe){
-		if(!((gAudio._vu = fopen(gAudio.vu_pipe, "w+"))))
+	
+	/* if pipe path was specified and not yet opened/created, do it here and now */
+	if(!gAudio.h_vu_pipe && gAudio.vu_pipe){
+		if(((gAudio.h_vu_pipe = fifo_open(gAudio.vu_pipe))) <= 0){
+			fifo_close(gAudio.h_vu_pipe); /* cleanup handles */
 			return;
-	} else
-		gAudio._vu = stdout;
+		}
+	}
 
 	va_list args;
-
 	va_start(args, fmt);
-	int r = vfprintf(gAudio._vu, fmt, args);
+	if(!gAudio.vu_pipe) /* just write stdout */
+		vfprintf(stdout, fmt, args);
+	else if(gAudio.h_vu_pipe > 0) /* hit the pipe */
+		vdprintf(gAudio.h_vu_pipe - 1, fmt, args);
 	va_end (args);
-	if(r >= 0)
-		return;
-
-	/* error */
-	if(gAudio.vu_pipe){
-		fclose(gAudio._vu);
-		gAudio._vu = NULL;
-	}
 }
 
 /* 40 cols*/

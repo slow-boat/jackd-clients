@@ -96,7 +96,7 @@ struct audio {
 	/* from connection */
 	ftype samplerate;
 	const char ** source_ports; /* list of source ports we are connecting to */
-	FILE * _vu; /* file to write VU instead of stdout */
+	int h_vu_pipe; /* VU pipe handle */
 	bool disconnected; /* flag indicating source port disconnected */
 	bool jack_activated; /* flag that client is active */
 	struct chan * chan; /* pointer to array of stats- one per channel */

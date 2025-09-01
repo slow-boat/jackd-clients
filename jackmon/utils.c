@@ -20,6 +20,8 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <limits.h>
+#include <stdarg.h>
 
 #include "utils.h"
 
@@ -250,3 +252,50 @@ nomem:
 	exit(1);
 }
 
+/**
+ * Create and open a named pipe for read/write, non-blocking,
+ * with buffer size set to minimum supported by the system.
+ *
+ * @param path  Path to the FIFO.
+ * @return      File descriptor, or -1 on error.
+ */
+int fifo_open(const char *path) {
+    int fd;
+
+    /* create fifo if not existing already */
+    if (mkfifo(path, 0666) < 0 && errno != EEXIST) {
+        perror("mkfifo");
+        return -1;
+    }
+
+    /* Open fifo, non-blocking write- with read to keep it open */
+    fd = open(path, O_RDWR | O_NONBLOCK, 0);
+    if (fd < 0) {
+        perror("open");
+        return -1;
+    }
+
+    /* Shrink buffer to minimum size PIPE_BUF which is the atomic write size*/
+    fcntl(fd, F_SETPIPE_SZ, PIPE_BUF);
+
+    return fd + 1; /* fd can be 0, which we use as "invalid" so add one */
+}
+
+int fifo_printf(int fd, const char *fmt, ...) {
+	if(fd <= 0)
+		return -1;
+
+    va_list ap;
+    va_start(ap, fmt);
+    int ret = vdprintf(fd - 1, fmt, ap);
+	if (ret < 0)
+		ret = (errno == EAGAIN || errno == EWOULDBLOCK) ? 0 : -1;
+    va_end(ap);
+    return ret;
+}
+
+void fifo_close(int fd) {
+	if(fd > 0)
+		close(fd - 1);
+	fd = 0;
+}
