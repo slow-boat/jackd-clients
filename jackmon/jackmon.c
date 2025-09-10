@@ -65,7 +65,7 @@ static void parse_opts(int argc, char *argv[]){
 			gAudio.clip_ms=strtoul(optarg, NULL, 0);
 			break;
 		case 'G':
-			gAudio.clip_gpio=strtol(optarg, NULL, 0);
+			gAudio.clip_gpio.gpio=strtol(optarg, NULL, 0);
 			break;
 		case 'n':
 			gAudio.name=optarg;
@@ -83,7 +83,7 @@ static void parse_opts(int argc, char *argv[]){
 			gAudio.level_cmd=optarg;
 			break;
 		case 'g':
-			gAudio.level_gpio=strtol(optarg, NULL, 0);
+			gAudio.level_gpio.gpio=strtol(optarg, NULL, 0);
 			break;
 		case 'p':
 			gAudio.vu_pipe=optarg;
@@ -165,7 +165,7 @@ static void parse_config(int argc, char *argv[]){
         } else if (!strcmp(key, "level_sec"))
         	gAudio.level_sec = strtoul(val, NULL, 0);
 		else if (!strcmp(key, "level_gpio"))
-			gAudio.level_gpio = strtol(val, NULL, 0);
+			gAudio.level_gpio.gpio = strtol(val, NULL, 0);
         else if (!strcmp(key, "clip_cmd")){
 			Asprintf(&gAudio.clip_cmd, "%s", val);
         }else if (!strcmp(key, "clip_ms"))
@@ -173,7 +173,7 @@ static void parse_config(int argc, char *argv[]){
         else if (!strcmp(key, "clip_samples"))
         	gAudio.clip_samples = strtoul(val, NULL, 0);
         else if (!strcmp(key, "clip_gpio"))
-			gAudio.clip_gpio = strtol(val, NULL, 0);
+			gAudio.clip_gpio.gpio = strtol(val, NULL, 0);
 		else if (!strcmp(key, "vu_ms"))
 			gAudio.vu_ms = strtoul(val, NULL, 0);
 		else if (!strcmp(key, "vu_peak_hold_ms"))
@@ -209,11 +209,11 @@ int main(int argc, char *argv[]){
 		gAudio.sources = "Built-in Audio.*:capture_*";
 
 	/* setup GPIO */
-	if(!gpio_init(gAudio.level_gpio))
-		debug("Level GPIO %d %s\n", abs(gAudio.level_gpio), gAudio.level_gpio < 0 ? "Active Low":"Active High");
+	if(gAudio.level_gpio.gpio)
+		gAudio.level_gpio.name = "Level";
 
 	/* Set up "vox" to do something when level exceeds threshold */
-	if(gAudio.level_sinks || gAudio.level_cmd || gAudio.level_gpio){
+	if(gAudio.level_sinks || gAudio.level_cmd || gAudio.level_gpio.gpio){
 		/* lets set up some defaults for RMS detection */
 		gAudio.rms_en = true; /* level needs rms */
 		if(!gAudio.level_sec)
@@ -236,15 +236,15 @@ int main(int argc, char *argv[]){
 	}
 
 	/* Handle clipping */
-	if(gAudio.clip_cmd || gAudio.debug || gAudio.clip_gpio){
+	if(gAudio.clip_cmd || gAudio.debug || gAudio.clip_gpio.gpio){
 		gAudio.clip_en = true;
 		if(!gAudio.clip_samples)
 			gAudio.clip_samples = 4;
-		if(gAudio.clip_gpio){
+		if(gAudio.clip_gpio.gpio){
 			if(!gAudio.clip_ms)
 				gAudio.clip_ms = 200; /* default 200ms for LED flash */
-			if(!gpio_init(gAudio.clip_gpio))
-				debug("Clip indicator GPIO %d %s\n", abs(gAudio.clip_gpio), gAudio.clip_gpio < 0 ? "Active Low":"Active High");
+			if(gAudio.clip_gpio.gpio)
+				gAudio.clip_gpio.name = "Clip Indicator";
 		}
 	}
 
@@ -321,7 +321,7 @@ int main(int argc, char *argv[]){
 						static const struct systemcall_env e[] = {{"CLIP" , "1" }, {NULL , NULL }};
 						systemcall(gAudio.clip_cmd, e, 100);
 					}
-					gpio_set(gAudio.clip_gpio, true);
+					gpio_set(&gAudio.clip_gpio, true);
 				} else if (gAudio.clip_cmd && !gAudio.clip_ms)
 					systemcall(gAudio.clip_cmd, NULL, 100); /* one shot- no args */
 			} else if (!timer_poll(&gAudio._clip_hold) && clip_set){
@@ -332,7 +332,7 @@ int main(int argc, char *argv[]){
 						static const struct systemcall_env e[] = {{"CLIP" , "0" }, {NULL , NULL }};
 						systemcall(gAudio.clip_cmd, e, 100);
 					}
-					gpio_set(gAudio.clip_gpio, false);
+					gpio_set(&gAudio.clip_gpio, false);
 				}
 			}
 		}
@@ -361,9 +361,9 @@ int main(int argc, char *argv[]){
 				}
 
 				/* GPIO */
-				if(gAudio.level_gpio) {
-					debug("GPIO %d on\n", abs(gAudio.level_gpio));
-					gpio_set(gAudio.level_gpio, true);
+				if(gAudio.level_gpio.gpio) {
+					debug("GPIO %d on\n", abs(gAudio.level_gpio.gpio));
+					gpio_set(&gAudio.level_gpio, true);
 				}
 			}
 		} else if (gAudio.level_sec && !timer_poll(&gAudio._level_hold) && threshold_set){ /* -1 (starting) or 1 */
@@ -387,9 +387,9 @@ int main(int argc, char *argv[]){
 			}
 
 			/* GPIO */
-			if(gAudio.level_gpio){
-				debug("GPIO %d off\n", abs(gAudio.level_gpio));
-				gpio_set(gAudio.level_gpio, false);
+			if(gAudio.level_gpio.gpio){
+				debug("GPIO %d off\n", abs(gAudio.level_gpio.gpio));
+				gpio_set(&gAudio.level_gpio, false);
 			}
 		}
 

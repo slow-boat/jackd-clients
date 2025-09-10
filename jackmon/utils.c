@@ -141,10 +141,11 @@ static int write_sysfs(const char *path, const char *value)
 {
     int fd = open(path, O_WRONLY);
     if (fd < 0) {
-        fprintf(stderr, "Failed to open %s\n", path);
+        fprintf(stderr, "Failed to open %s: %d: %s\n", path, errno, strerror(errno));
         return -1;
     }
     if (write(fd, value, strlen(value)) < 0) {
+    	fprintf(stderr, "Failed to write %s: %d: %s\n", path, errno, strerror(errno));
         close(fd);
         return 1;
     }
@@ -152,44 +153,48 @@ static int write_sysfs(const char *path, const char *value)
     return 0;
 }
 
+extern struct audio gAudio;
 #define SYSFS_GPIO_DIR "/sys/class/gpio"
-int gpio_init(int gpio){
-	if(!gpio)
+int gpio_init(struct gpio_info * gpio){
+	if(gpio->initialised)
+		return 0;
+
+	if(!gpio->gpio)
 		return -1; /* no GPIO */
 	int err = -1;
 
-	bool active_low = gpio < 0;
-	gpio = abs(gpio);
+	gpio->active_low = gpio < 0;
+	gpio->gpio = abs(gpio->gpio);
 
 	/* track GPIO set owner */
 	mkdir("/dev/shm/gpio", 0755); /* ignore response */
 
 	char * s = NULL;
-	if(asprintf(&s, "%d", gpio) < 1)
+	if(asprintf(&s, "%d", gpio->gpio) < 1)
 		goto nomem;
 
 	int export; /* track export to see if we are initialising it here */
 	if(((export = write_sysfs(SYSFS_GPIO_DIR "/export", s))) < 0)
 		goto done;
-	free(s);
 
-	if(asprintf(&s, SYSFS_GPIO_DIR "/gpio%d/direction", gpio) < 8)
+	if(!gpio->direction_path && asprintf(&gpio->direction_path, SYSFS_GPIO_DIR "/gpio%d/direction", gpio->gpio) < 8)
 		goto nomem;
-
-	/* wait for GPIO struct to be set up */
-    int retries = 4;
-	while(write_sysfs(s, "out") < 0 && --retries)
-		sleep(1);
-	free(s);
-	if(!retries)
+	if(write_sysfs(gpio->direction_path, "out") < 0)
 		goto done;
 
-	if(asprintf(&s, SYSFS_GPIO_DIR "/gpio%d/active_low", gpio) < 8)
+	if(!gpio->active_low_path && asprintf(&gpio->active_low_path, SYSFS_GPIO_DIR "/gpio%d/active_low", gpio->gpio) < 8)
 		goto nomem;
-
-	if(write_sysfs(s, active_low?"1":"0") < 0)
+	if(write_sysfs(gpio->active_low_path, gpio->active_low?"1":"0") < 0)
 		goto done;
 
+	if(!gpio->pidfile && asprintf(&gpio->pidfile, "/dev/shm/gpio/gpio%d", gpio->gpio) < 1)
+		goto nomem;
+
+	if(!gpio->value_path && asprintf(&gpio->value_path, SYSFS_GPIO_DIR "/gpio%d/value", abs(gpio->gpio)) < 1)
+		goto nomem;
+
+	gpio->initialised = true;
+	fprintf(stderr, "Initialised GPIO %s, port %d, Active %s", gpio->name, gpio->gpio, gpio->active_low ? "Low" : "High");
 	/* try set to off by default if we just exported it- otherwise assume its correct */
 	if(!export && gpio_set(gpio, 0) < 0)
 		goto done;
@@ -206,54 +211,31 @@ nomem:
 	exit(1);
 }
 
-int gpio_set(int gpio, bool value){
-	char * path;	/* get path to value file */
-	if(asprintf(&path, SYSFS_GPIO_DIR "/gpio%d/value", abs(gpio)) < 1)
-		goto nomem;
+int gpio_set(struct gpio_info * gpio, bool value){
+	int err;
+	if((err = gpio_init(gpio)))
+		return err;
 
-	char * pidfile;
-	if(asprintf(&pidfile, "/dev/shm/gpio/gpio%d", abs(gpio)) < 1)
-		goto nomem;
-	bool retry = 0;
-
-try_export:;
-	int err = -1;
-	FILE * pf = fopen(pidfile, value ? "w":"r");
+	err = -1;
+	FILE * pf = fopen(gpio->pidfile, value ? "w":"r");
 	if(pf){ /* we've used it before or are setting it to 1*/
 		int pid = getpid();
 		if(value){
 			/* set- write pid to gpio tracking file and set gpio */
 			fprintf(pf, "%d", pid);
-			err = write_sysfs(path, "1");
+			err = write_sysfs(gpio->value_path, "1");
 		} else { /* read back the pid that last set the gpio, and only clear if it was us */
 			int rpid;
 			if(!fscanf(pf, "%d", &rpid) || rpid == pid) /* or if we cant read the pid */
-				err = write_sysfs(path, "0");
+				err = write_sysfs(gpio->value_path, "0");
 		}
 		fclose(pf);
 	} else {/* cant open file so just smash the GPIO */
 		if(value)
-			fprintf(stderr, "Failed to open GPIO track file %s for writing\n", pidfile);
-		err = write_sysfs(path, value?"1":"0");
+			fprintf(stderr, "Failed to open GPIO track file %s for writing\n", gpio->pidfile);
+		err = write_sysfs(gpio->value_path, value?"1":"0");
 	}
-
-	if(err < 0 && !retry){ /* try to export it */
-		retry = true;
-		if((err=gpio_init(gpio)))
-			goto done;
-		goto try_export;
-	}
-
-done:
-	if (path)
-		free(path);
-	if(pidfile)
-		free(pidfile);
-
 	return err;
-nomem:
-	perror("ERROR: out of memory");
-	exit(1);
 }
 
 /**

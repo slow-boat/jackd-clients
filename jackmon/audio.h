@@ -79,12 +79,12 @@ struct audio {
 	char * clip_cmd; /* script to run -eg trigger a one-shot LED */
 	unsigned clip_ms; /* sets script environment variable CLIP 1 and after duration ms back to 0 */
 	unsigned clip_samples; /* number of consecutive clamped samples to trigger clip */
-	int clip_gpio; /* positive for active high, negative for active low- sets clip_ms default 200ms if not set */
+	struct gpio_info clip_gpio; /* positive for active high, negative for active low- sets clip_ms default 200ms if not set */
 	/* threshold detector */
 	unsigned level_sec; /* time to hold after level collases below threshold */
 	char * level_cmd; /* call this with env LEVEL=1 for on, 0 for off- eg pump into a GPIO directly */
 	ftype level_thres; /* threshold for setting level/hold */
-	int level_gpio; /* sysfs GPIO to control level... negative means active low */
+	struct gpio_info level_gpio; /* sysfs GPIO to control level... negative means active low */
 
 	/* which functions are enabled based on config */
 	bool rms_en; /* enable rms calculations */

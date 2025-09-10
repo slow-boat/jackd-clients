@@ -87,9 +87,20 @@ struct systemcall_env {
 	char * val;
 };
 
+struct gpio_info {
+	int gpio;
+	bool initialised;
+	bool active_low;
+	char * name;
+	char * direction_path;
+	char * value_path;
+	char * active_low_path;
+	char * pidfile;
+};
+
 int systemcall(const char * command, const struct systemcall_env * env,  unsigned timeout_ms);
-int gpio_init(int gpio);
-int gpio_set(int gpio, bool value);
+int gpio_init(struct gpio_info * gpio);
+int gpio_set(struct gpio_info * gpio, bool value);
 
 int fifo_open(const char *path);
 void fifo_close(int fd);
