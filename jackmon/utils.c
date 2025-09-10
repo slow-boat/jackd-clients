@@ -161,6 +161,9 @@ int gpio_init(int gpio){
 	bool active_low = gpio < 0;
 	gpio = abs(gpio);
 
+	/* track GPIO set owner */
+	mkdir("/dev/shm/gpio", 0755); /* ignore response */
+
 	char * s = NULL;
 	if(asprintf(&s, "%d", gpio) < 1)
 		goto nomem;
@@ -173,18 +176,19 @@ int gpio_init(int gpio){
 	if(asprintf(&s, SYSFS_GPIO_DIR "/gpio%d/direction", gpio) < 8)
 		goto nomem;
 
-	if(write_sysfs(s, "out") < 0)
-		goto done;
+	/* wait for GPIO struct to be set up */
+    int retries = 4;
+	while(write_sysfs(s, "out") < 0 && --retries)
+		sleep(1);
 	free(s);
+	if(!retries)
+		goto done;
 
 	if(asprintf(&s, SYSFS_GPIO_DIR "/gpio%d/active_low", gpio) < 8)
 		goto nomem;
 
 	if(write_sysfs(s, active_low?"1":"0") < 0)
 		goto done;
-
-	/* track GPIO set owner */
-	mkdir("/dev/shm/gpio", 0755); /* ignore response */
 
 	/* try set to off by default if we just exported it- otherwise assume its correct */
 	if(!export && gpio_set(gpio, 0) < 0)
