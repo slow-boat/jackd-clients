@@ -270,6 +270,12 @@ int main(int argc, char *argv[]){
 		ftype trigger_level=0;
 		bool clip = false;
 
+		/* keep trying to set up GPIOs- this might take some time on boot after exporting */
+		if(gAudio.clip_gpio.gpio && !gAudio.clip_gpio.initialised)
+			gpio_init(&gAudio.clip_gpio);
+		if(gAudio.level_gpio.gpio && !gAudio.level_gpio.initialised)
+			gpio_init(&gAudio.level_gpio);
+
 		bool vu_valid=false;
 		if(gAudio.vu_ms){
 			for (int i=0; i < gAudio.channels; i++){

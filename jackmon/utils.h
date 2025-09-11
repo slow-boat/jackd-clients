@@ -91,6 +91,7 @@ struct gpio_info {
 	int gpio;
 	bool initialised;
 	bool active_low;
+	bool val;
 	char * name;
 	char * direction_path;
 	char * value_path;

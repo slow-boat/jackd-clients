@@ -140,10 +140,9 @@ int systemcall(const char * command, const struct systemcall_env * env,  unsigne
 static int write_sysfs(const char *path, const char *value)
 {
     int fd = open(path, O_WRONLY);
-    if (fd < 0) {
-        fprintf(stderr, "Failed to open %s: %d: %s\n", path, errno, strerror(errno));
-        return -1;
-    }
+    if (fd < 0)
+        return -1; /* dont print error- can get permissions error immediately after export if udev hasn't kicked in yet */
+
     if (write(fd, value, strlen(value)) < 0) {
     	fprintf(stderr, "Failed to write %s: %d: %s\n", path, errno, strerror(errno));
         close(fd);
@@ -169,23 +168,29 @@ int gpio_init(struct gpio_info * gpio){
 	/* track GPIO set owner */
 	mkdir("/dev/shm/gpio", 0755); /* ignore response */
 
-	char * s = NULL;
-	if(asprintf(&s, "%d", gpio->gpio) < 1)
-		goto nomem;
-
-	int export; /* track export to see if we are initialising it here */
-	if(((export = write_sysfs(SYSFS_GPIO_DIR "/export", s))) < 0)
-		goto done;
-
 	if(!gpio->direction_path && asprintf(&gpio->direction_path, SYSFS_GPIO_DIR "/gpio%d/direction", gpio->gpio) < 8)
 		goto nomem;
+
+	/* if direction file doesn't exist, we need to export the GPIO */
+	struct stat st;
+	if(stat(gpio->direction_path, &st)){
+		char * s = NULL;
+		if(asprintf(&s, "%d", gpio->gpio) < 1)
+			goto nomem;
+		int export = write_sysfs(SYSFS_GPIO_DIR "/export", s); /* track export to see if we are initialising it here */
+		free(s);
+		if(export < 0)
+			return err;
+		fprintf(stderr, "Exported gpio%d for %s\n", gpio->gpio, gpio->name);
+	}
+
 	if(write_sysfs(gpio->direction_path, "out") < 0)
-		goto done;
+		return err;
 
 	if(!gpio->active_low_path && asprintf(&gpio->active_low_path, SYSFS_GPIO_DIR "/gpio%d/active_low", gpio->gpio) < 8)
-		goto nomem;
+		return err;
 	if(write_sysfs(gpio->active_low_path, gpio->active_low?"1":"0") < 0)
-		goto done;
+		return err;
 
 	if(!gpio->pidfile && asprintf(&gpio->pidfile, "/dev/shm/gpio/gpio%d", gpio->gpio) < 1)
 		goto nomem;
@@ -194,17 +199,13 @@ int gpio_init(struct gpio_info * gpio){
 		goto nomem;
 
 	gpio->initialised = true;
-	fprintf(stderr, "Initialised GPIO %s, port %d, Active %s", gpio->name, gpio->gpio, gpio->active_low ? "Low" : "High");
+	fprintf(stderr, "Initialised GPIO %s, port %d, Active %s\n", gpio->name, gpio->gpio, gpio->active_low ? "Low" : "High");
+
 	/* try set to off by default if we just exported it- otherwise assume its correct */
-	if(!export && gpio_set(gpio, 0) < 0)
-		goto done;
+	if(gpio_set(gpio, gpio->val) < 0)
+		return err;
 
-	err = 0;
-
-done:
-	if(s)
-		free(s);
-	return err;
+	return 0;
 
 nomem:
 	perror("ERROR: out of memory");
@@ -213,6 +214,7 @@ nomem:
 
 int gpio_set(struct gpio_info * gpio, bool value){
 	int err;
+	gpio->val = value; /* update in case init fails on udev permissions or export not set up yet, and we do it later */
 	if((err = gpio_init(gpio)))
 		return err;
 
